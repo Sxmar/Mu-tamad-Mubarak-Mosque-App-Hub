@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mu'tamad Hub" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>Mu'tamad Hub</title>
+
+  <link rel="icon" href="images/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="images/favicon-192.png" />
+  <link rel="apple-touch-icon" href="images/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="antialiased">
+
+  <!-- Black fill behind the iPhone status bar -->
+  <div class="status-fill"></div>
+
+  <!-- Top progress bar (shown while loading/saving) -->
+  <div id="topLoader" class="top-loader hidden"></div>
+
+  <!-- BRAND BANNER (scrolls away) -->
+  <div class="brand-block">
+    <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <img src="images/MKAC-logo.png" alt="Majlis Khuddamul Ahmadiyya Canada" class="brand-logo" />
+      <figure class="brand-quote">
+        <blockquote>“Nations cannot be reformed without the reformation of the youth”</blockquote>
+        <figcaption>Hazrat Musleh Mau'ud <sup>ra</sup></figcaption>
+      </figure>
+    </div>
+  </div>
+  <div class="bismillah" dir="rtl" lang="ar">بِسْمِ اللّٰهِ الرَّحْمٰنِ الرَّحِيْمِ</div>
+
+  <!-- APP BAR (sticky) -->
+  <header class="app-bar">
+    <div class="max-w-2xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="app-mark"><i data-lucide="layout-dashboard" class="w-5 h-5"></i></span>
+        <div class="min-w-0">
+          <h1 class="text-lg font-extrabold leading-tight truncate">Mu'tamad Hub</h1>
+          <p class="text-[11px] leading-tight text-white/80 truncate">Local Mu'tamad · MKAC</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-1">
+        <span id="syncPill" class="sync-pill sync-local">
+          <i data-lucide="cloud-off" class="w-3.5 h-3.5"></i><span>Local</span>
+        </span>
+        <button id="openSettings" class="icon-btn icon-btn-light" aria-label="Settings / Supabase Sync">
+          <i data-lucide="settings" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN -->
+  <main class="main-pad max-w-2xl mx-auto px-4 pt-5">
+
+    <!-- Setup banner (local-only mode) -->
+    <div id="syncBanner" class="hidden mb-4 rounded-2xl border-2 border-black bg-white p-4">
+      <div class="flex gap-3">
+        <i data-lucide="cloud-off" class="w-5 h-5 text-red-700 shrink-0 mt-0.5"></i>
+        <div class="text-sm text-neutral-800">
+          <p class="font-bold">Local-only mode</p>
+          <p class="text-neutral-600 mt-1">Your data is saved on this device only. Tap the ⚙ gear and paste your Supabase URL and anon key to sync across devices.</p>
+          <button data-action="open-settings" class="mt-3 btn btn-dark btn-sm">Set up sync</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 1: QUICK LINKS -->
+    <section id="tab-links" class="tab-panel">
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 class="section-title">Quick Links</h2>
+          <p class="text-sm text-neutral-500">Your Mu'tamad hub</p>
+        </div>
+        <button data-action="add-link" class="btn btn-primary">
+          <i data-lucide="plus" class="w-5 h-5"></i><span>Add New Link</span>
+        </button>
+      </div>
+      <div id="linksList" class="space-y-3"></div>
+    </section>
+
+    <!-- TAB 2: NOTES & CALENDAR -->
+    <section id="tab-notes" class="tab-panel hidden">
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 class="section-title">Notes &amp; Calendar</h2>
+          <p class="text-sm text-neutral-500">Log activities by day</p>
+        </div>
+        <button data-action="cal-today" class="btn btn-ghost">Today</button>
+      </div>
+
+      <div class="card p-3">
+        <div class="flex items-center justify-between mb-2">
+          <button data-action="cal-prev" class="icon-btn" aria-label="Previous month">
+            <i data-lucide="chevron-left" class="w-5 h-5"></i>
+          </button>
+          <h3 id="calTitle" class="font-extrabold text-neutral-900 text-base"></h3>
+          <button data-action="cal-next" class="icon-btn" aria-label="Next month">
+            <i data-lucide="chevron-right" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <div class="cal-grid text-center text-[11px] font-bold text-neutral-500 mb-1 uppercase tracking-wide">
+          <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+        </div>
+        <div id="calGrid" class="cal-grid"></div>
+      </div>
+
+      <div class="mt-5">
+        <div class="flex items-center justify-between mb-2">
+          <h3 id="dayTitle" class="font-extrabold text-neutral-900"></h3>
+          <span id="dayCount" class="text-xs font-semibold text-red-700"></span>
+        </div>
+        <button id="addEntryBtn" data-action="add-note" class="btn btn-primary w-full mb-3">
+          <i data-lucide="plus" class="w-5 h-5"></i><span id="addEntryLabel">Add Entry</span>
+        </button>
+        <div id="dayNotes" class="space-y-3"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: REPORT SUMMARY -->
+    <section id="tab-report" class="tab-panel hidden">
+      <div class="mb-4">
+        <h2 class="section-title">Monthly Report Helper</h2>
+        <p class="text-sm text-neutral-500">Everything grouped by department</p>
+      </div>
+
+      <label for="reportMonth" class="lbl">Month</label>
+      <select id="reportMonth" class="field mb-2"></select>
+      <p id="reportDue" class="text-xs font-semibold text-red-700 mb-4"></p>
+
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <button data-action="copy-report" class="btn btn-primary">
+          <i data-lucide="copy" class="w-5 h-5"></i><span>Copy All for Report</span>
+        </button>
+        <button data-action="export-json" class="btn btn-dark">
+          <i data-lucide="download" class="w-5 h-5"></i><span>Export JSON Backup</span>
+        </button>
+      </div>
+
+      <div id="reportSummary" class="mb-3"></div>
+      <div id="reportBody" class="space-y-4"></div>
+    </section>
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav fixed bottom-0 inset-x-0 z-30">
+    <div class="max-w-2xl mx-auto grid grid-cols-3">
+      <button class="nav-btn nav-active" data-tab="links">
+        <i data-lucide="link" class="w-6 h-6"></i><span>Quick Links</span>
+      </button>
+      <button class="nav-btn" data-tab="notes">
+        <i data-lucide="calendar-days" class="w-6 h-6"></i><span>Notes &amp; Calendar</span>
+      </button>
+      <button class="nav-btn" data-tab="report">
+        <i data-lucide="file-text" class="w-6 h-6"></i><span>Report Summary</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- SHEET: SETTINGS -->
+  <div id="sheet-settings" class="sheet-wrap hidden" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="sheet-head">
+        <h3 class="text-lg font-extrabold text-neutral-900">Settings / Supabase Sync</h3>
+        <button class="icon-btn" data-close-sheet aria-label="Close"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="settingsForm" class="sheet-body space-y-4" autocomplete="off">
+        <p class="text-sm text-neutral-600">
+          Find these in Supabase → Project Settings → API. They are stored only in this browser's
+          <code class="text-red-700 font-semibold">localStorage</code>. Leave blank to use local-only mode.
+        </p>
+        <div>
+          <label for="setUrl" class="lbl">Supabase Project URL</label>
+          <input id="setUrl" class="field" type="url" inputmode="url" placeholder="https://xxxxxxxx.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false" />
+        </div>
+        <div>
+          <label for="setKey" class="lbl">Supabase Anon Key</label>
+          <textarea id="setKey" class="field" rows="3" placeholder="eyJhbGciOi..." autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <button type="submit" class="btn btn-primary">Save &amp; Test</button>
+          <button type="button" id="clearKeys" class="btn btn-ghost">Use Local Only</button>
+        </div>
+        <button type="button" id="uploadLocal" class="btn btn-ghost w-full">
+          <i data-lucide="cloud" class="w-5 h-5"></i><span>Upload local data to Supabase</span>
+        </button>
+        <p id="settingsStatus" class="text-sm text-neutral-600"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- SHEET: LINK -->
+  <div id="sheet-link" class="sheet-wrap hidden" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Link">
+      <div class="sheet-head">
+        <h3 id="linkSheetTitle" class="text-lg font-extrabold text-neutral-900">Add New Link</h3>
+        <button class="icon-btn" data-close-sheet aria-label="Close"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="linkForm" class="sheet-body space-y-4" autocomplete="off">
+        <input type="hidden" id="linkId" />
+        <div>
+          <label for="linkTitle" class="lbl">Title</label>
+          <input id="linkTitle" class="field" type="text" required placeholder="e.g. Tajneed List" />
+        </div>
+        <div>
+          <label for="linkSubtitle" class="lbl">Subtitle (optional)</label>
+          <input id="linkSubtitle" class="field" type="text" placeholder="e.g. Updated monthly" />
+        </div>
+        <div>
+          <label for="linkBadge" class="lbl">Type badge</label>
+          <input id="linkBadge" class="field" type="text" list="badgeOptions" placeholder="e.g. Excel Sheet" />
+          <datalist id="badgeOptions">
+            <option value="Excel Sheet"></option>
+            <option value="Google Sheet"></option>
+            <option value="Google Doc"></option>
+            <option value="PDF"></option>
+            <option value="MKAC Markaz"></option>
+            <option value="Portal"></option>
+            <option value="Website"></option>
+          </datalist>
+        </div>
+        <div>
+          <label for="linkUrl" class="lbl">URL</label>
+          <input id="linkUrl" class="field" type="text" inputmode="url" placeholder="https://..." autocapitalize="off" autocorrect="off" spellcheck="false" />
+        </div>
+        <button type="submit" class="btn btn-primary w-full">Save Link</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- SHEET: NOTE -->
+  <div id="sheet-note" class="sheet-wrap hidden" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Entry">
+      <div class="sheet-head">
+        <div class="min-w-0">
+          <h3 id="noteSheetTitle" class="text-lg font-extrabold text-neutral-900 truncate">New Entry</h3>
+          <p id="noteSheetDate" class="text-xs font-semibold text-red-700"></p>
+        </div>
+        <button class="icon-btn" data-close-sheet aria-label="Close"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="noteForm" class="sheet-body space-y-4" autocomplete="off">
+        <input type="hidden" id="noteId" />
+        <input type="hidden" id="noteDate" />
+        <div>
+          <label for="noteTitle" class="lbl">Title</label>
+          <input id="noteTitle" class="field" type="text" required placeholder="e.g. Monthly Ijtema planning" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="noteTime" class="lbl">Time</label>
+            <input id="noteTime" class="field" type="time" />
+          </div>
+          <div>
+            <label for="noteDept" class="lbl">Department</label>
+            <select id="noteDept" class="field" required></select>
+          </div>
+        </div>
+        <div>
+          <label for="noteDesc" class="lbl">Description</label>
+          <textarea id="noteDesc" class="field" rows="4" placeholder="What happened / activity details"></textarea>
+        </div>
+        <div>
+          <label for="noteExtra" class="lbl">Extra Notes</label>
+          <textarea id="noteExtra" class="field" rows="3" placeholder="Follow-ups, attendance counts, Red Book reminders"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary w-full">Save Entry</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- TOASTS -->
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
