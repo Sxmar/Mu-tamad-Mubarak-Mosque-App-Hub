@@ -46,7 +46,8 @@
     links: 'mk_links',
     notes: 'mk_notes',
     linksSeededLocal: 'mk_links_seeded_local',
-    linksSeededRemote: 'mk_links_seeded_remote'
+    linksSeededRemote: 'mk_links_seeded_remote',
+    lastDept: 'mk_last_dept'
   };
 
   /* ------------------------------------------------------------------ *
@@ -127,8 +128,10 @@
       return 'Invalid Supabase anon key. Re-check it in Settings.';
     }
     if (/row-level security|violates row-level/i.test(raw)) {
-      return 'Blocked by Row Level Security. Re-run the policies from the SQL file.';
+      return 'Blocked by Row Level Security. Make sure you are signed in and have re-run the SQL file.';
     }
+    if (/Invalid login credentials/i.test(raw)) return 'Wrong email or password.';
+    if (/Email not confirmed/i.test(raw)) return 'This email is not confirmed yet. In Supabase, open Authentication → Users and confirm the user.';
     return raw;
   }
 
@@ -208,27 +211,50 @@
     reportMonth: `${now.getFullYear()}-${pad(now.getMonth() + 1)}`,
     reportNotes: [],
     client: null,
-    clientSig: ''
+    clientSig: '',
+    authSub: null,
+    user: null,
+    userId: undefined // undefined = not known yet, null = signed out, string = signed in
   };
 
   /* ------------------------------------------------------------------ *
    * Data layer (Supabase when configured, otherwise localStorage)
    * ------------------------------------------------------------------ */
+  function dropClient() {
+    if (state.authSub) { try { state.authSub.unsubscribe(); } catch { /* ignore */ } }
+    state.authSub = null;
+    state.client = null;
+    state.clientSig = '';
+    state.user = null;
+    state.userId = undefined;
+  }
+
   function getClient() {
     const forceLocal = localStorage.getItem(LS.forceLocal) === '1';
     const url = (localStorage.getItem(LS.url) || DEFAULT_SUPABASE_URL || '').trim();
     const key = (localStorage.getItem(LS.key) || DEFAULT_SUPABASE_KEY || '').trim();
-    if (forceLocal || !url || !key) { state.client = null; state.clientSig = ''; return null; }
+    if (forceLocal || !url || !key) { if (state.client) dropClient(); return null; }
     if (!window.supabase || typeof window.supabase.createClient !== 'function') return null;
     const sig = `${url}|${key}`;
     if (!state.client || state.clientSig !== sig) {
-      state.client = window.supabase.createClient(url, key);
+      dropClient();
+      const client = window.supabase.createClient(url, key, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+      });
+      state.client = client;
       state.clientSig = sig;
+      const { data } = client.auth.onAuthStateChange((_event, session) => {
+        // Defer: supabase-js warns against awaiting other calls inside this callback.
+        setTimeout(() => { if (state.client === client) setUser(session ? session.user : null); }, 0);
+      });
+      state.authSub = data && data.subscription;
     }
     return state.client;
   }
 
   const isRemote = () => !!getClient();
+  // In synced mode, data is only available once signed in.
+  const canLoad = () => !isRemote() || !!state.user;
 
   const readLocal = (k) => {
     try { const v = JSON.parse(localStorage.getItem(k)); return Array.isArray(v) ? v : []; }
@@ -301,15 +327,6 @@
       }
       return readLocal(LS.notes).filter((n) => n.date >= from && n.date <= to).sort(byTimeThenCreated);
     },
-    async listAllNotes() {
-      const c = getClient();
-      if (c) {
-        const { data, error } = await c.from('notes').select('*').order('date', { ascending: true }).order('time', { ascending: true, nullsFirst: true });
-        if (error) throw error;
-        return data.map(normalizeNote);
-      }
-      return readLocal(LS.notes).sort(byTimeThenCreated);
-    },
     async saveNote(note) {
       const c = getClient();
       if (c) {
@@ -377,6 +394,7 @@
   }
 
   async function loadLinks() {
+    if (!canLoad()) return;
     const el = $('#linksList');
     el.innerHTML = spinnerBlock('Loading links…');
     setBusy(true);
@@ -479,6 +497,7 @@
    * TAB 2 — Notes & calendar
    * ------------------------------------------------------------------ */
   async function loadMonth() {
+    if (!canLoad()) return;
     const { viewY: y, viewM: m } = state;
     renderCalendar();
     $('#dayNotes').innerHTML = spinnerBlock('Loading entries…');
@@ -584,16 +603,34 @@
     if (sameMonth) { renderCalendar(); renderDay(); } else { loadMonth(); }
   }
 
+  const isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+
+  function updateNoteSheetDate() {
+    const v = $('#noteDate').value;
+    $('#noteSheetDate').textContent = isDateStr(v) ? fmtDateLong(v) : 'Pick a date';
+  }
+
+  function setDeptField(value) {
+    const sel = $('#noteDept');
+    // Keep an entry's department even if it's no longer in the list.
+    if (value && !Array.from(sel.options).some((o) => o.value === value)) {
+      sel.insertAdjacentHTML('beforeend', `<option value="${esc(value)}">${esc(value)}</option>`);
+    }
+    sel.value = value || '';
+  }
+
   function openNoteSheet(id) {
     const note = id ? state.monthNotes.find((n) => n.id === id) : null;
     const date = note ? note.date : state.selected;
+    const lastDept = localStorage.getItem(LS.lastDept);
     $('#noteSheetTitle').textContent = note ? 'Edit Entry' : 'New Entry';
-    $('#noteSheetDate').textContent = fmtDateLong(date);
     $('#noteId').value = note ? note.id : '';
     $('#noteDate').value = date;
+    updateNoteSheetDate();
     $('#noteTitle').value = note ? note.title : '';
     $('#noteTime').value = note ? note.time || '' : nowTime();
-    $('#noteDept').value = note && note.department ? note.department : DEPARTMENTS[0];
+    // New entries start on the department used last time; first time ever, you must pick one.
+    setDeptField(note ? note.department : (DEPARTMENTS.includes(lastDept) ? lastDept : ''));
     $('#noteDesc').value = note ? note.description || '' : '';
     $('#noteExtra').value = note ? note.extra_notes || '' : '';
     openSheet('note');
@@ -604,22 +641,34 @@
     e.preventDefault();
     const title = $('#noteTitle').value.trim();
     if (!title) { toast('Please enter a title.', 'error'); return; }
+    const date = $('#noteDate').value;
+    if (!isDateStr(date)) { toast('Please pick a date.', 'error'); $('#noteDate').focus(); return; }
+    const department = $('#noteDept').value;
+    if (!department) { toast('Please choose a department.', 'error'); $('#noteDept').focus(); return; }
     const id = $('#noteId').value || uid();
     const isEdit = !!$('#noteId').value;
+    const original = isEdit ? state.monthNotes.find((n) => n.id === id) : null;
+    const moved = !!original && original.date !== date;
     const payload = {
       id,
-      date: $('#noteDate').value,
+      date,
       title,
       time: $('#noteTime').value || null,
-      department: $('#noteDept').value,
+      department,
       description: $('#noteDesc').value.trim(),
       extra_notes: $('#noteExtra').value.trim(),
       updated_at: new Date().toISOString()
     };
     try {
       await withButton(e.submitter || $('#noteForm button[type="submit"]'), () => api.saveNote(payload));
-      toast(isEdit ? 'Entry updated' : 'Entry saved', 'success');
+      if (DEPARTMENTS.includes(department)) localStorage.setItem(LS.lastDept, department);
+      toast(moved ? `Entry moved to ${fmtDateShort(date)}` : isEdit ? 'Entry updated' : 'Entry saved', 'success');
       closeSheets();
+      // Jump the calendar to the entry's (possibly new) date so you can see it.
+      const d = parseDate(date);
+      state.viewY = d.getFullYear();
+      state.viewM = d.getMonth();
+      state.selected = date;
       await loadMonth();
     } catch (err) {
       toast(errMsg(err), 'error');
@@ -673,6 +722,7 @@
   }
 
   async function loadReport() {
+    if (!canLoad()) return;
     $('#reportDue').textContent = dueDateText(state.reportMonth);
     $('#reportSummary').innerHTML = '';
     $('#reportBody').innerHTML = spinnerBlock('Building report…');
@@ -776,54 +826,107 @@
     }
   }
 
-  async function exportJson() {
-    try {
-      setBusy(true);
-      const [links, notes] = await Promise.all([api.listLinks(), api.listAllNotes()]);
-      const data = {
-        app: "Mu'tamad Hub",
-        exported_at: new Date().toISOString(),
-        links,
-        notes
-      };
-      const name = `mkac-backup-${todayStr()}.json`;
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-
-      // iOS standalone apps often can't download blobs; use the share sheet when available.
-      try {
-        const file = new File([blob], name, { type: 'application/json' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: name });
-          toast('Backup ready', 'success');
-          return;
-        }
-      } catch (shareErr) {
-        if (shareErr && shareErr.name === 'AbortError') return;
-      }
-
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      toast('Backup downloaded', 'success');
-    } catch (err) {
-      toast(`Export failed: ${errMsg(err)}`, 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   /* ------------------------------------------------------------------ *
    * Settings
    * ------------------------------------------------------------------ */
   function openSettings() {
     $('#setUrl').value = localStorage.getItem(LS.url) || DEFAULT_SUPABASE_URL || '';
     $('#setKey').value = localStorage.getItem(LS.key) || DEFAULT_SUPABASE_KEY || '';
-    $('#settingsStatus').textContent = isRemote() ? 'Status: connected to Supabase.' : 'Status: local-only mode.';
+    $('#settingsStatus').textContent = !isRemote() ? 'Status: local-only mode.'
+      : state.user ? 'Status: connected to Supabase.' : 'Status: connected to Supabase — sign in to see your data.';
+    refreshAccountUI();
     openSheet('settings');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Sign-in (Supabase Auth, email + password)
+   * ------------------------------------------------------------------ */
+  function clearData() {
+    state.links = [];
+    state.monthNotes = [];
+    state.reportNotes = [];
+    $('#linksList').innerHTML = '';
+    $('#dayNotes').innerHTML = '';
+    $('#reportSummary').innerHTML = '';
+    $('#reportBody').innerHTML = '';
+    renderCalendar();
+  }
+
+  function refreshAccountUI() {
+    const signedIn = isRemote() && !!state.user;
+    $('#accountBox').classList.toggle('hidden', !signedIn);
+    $('#accountEmail').textContent = signedIn ? state.user.email || '' : '';
+  }
+
+  // Show the login screen whenever sync is on but nobody is signed in (once we know).
+  function applyAuthGate() {
+    const locked = isRemote() && state.userId === null;
+    $('#loginScreen').classList.toggle('hidden', !locked);
+    if (locked) {
+      clearData();
+      refreshIcons();
+      setTimeout(() => { if (!$('#loginEmail').value) $('#loginEmail').focus(); }, 50);
+    }
+    refreshAccountUI();
+  }
+
+  function setUser(user) {
+    const newId = user ? user.id : null;
+    const changed = newId !== state.userId;
+    state.user = user || null;
+    state.userId = newId;
+    if (!changed) return;
+    applyAuthGate();
+    if (user) refreshCurrentTab();
+  }
+
+  function showLoginError(msg) {
+    const el = $('#loginError');
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+  }
+
+  async function signIn(e) {
+    e.preventDefault();
+    showLoginError('');
+    const c = getClient();
+    if (!c) { showLoginError('Sync is not set up. Tap "Server settings" below.'); return; }
+    const email = $('#loginEmail').value.trim();
+    const password = $('#loginPassword').value;
+    if (!email || !password) { showLoginError('Enter your email and password.'); return; }
+    try {
+      const { data, error } = await withButton(e.submitter || $('#loginForm button[type="submit"]'),
+        () => c.auth.signInWithPassword({ email, password }));
+      if (error) throw error;
+      $('#loginPassword').value = '';
+      setUser(data.user);
+      toast('Signed in', 'success');
+    } catch (err) {
+      showLoginError(errMsg(err));
+    }
+  }
+
+  async function signOut() {
+    const c = getClient();
+    if (!c) return;
+    try {
+      await withButton($('#signOutBtn'), () => c.auth.signOut());
+    } catch (err) {
+      toast(errMsg(err), 'error');
+    }
+    closeSheets();
+    setUser(null);
+    toast('Signed out', 'success');
+  }
+
+  function togglePassword() {
+    const input = $('#loginPassword');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    const btn = $('#togglePassword');
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    btn.innerHTML = `<i data-lucide="${show ? 'eye-off' : 'eye'}" class="w-5 h-5"></i>`;
+    refreshIcons();
   }
 
   async function saveSettings(e) {
@@ -863,13 +966,18 @@
       toast('Supabase connected', 'success');
       refreshSyncUI();
       closeSheets();
-      refreshCurrentTab();
+      // Find out whether this device already has a saved sign-in for this project.
+      const { data } = await getClient().auth.getSession();
+      const user = data && data.session ? data.session.user : null;
+      state.userId = undefined; // force the gate to re-evaluate
+      setUser(user);
     } catch (err) {
       // roll back to previous settings so the app keeps working
       if (prevUrl) localStorage.setItem(LS.url, prevUrl); else localStorage.removeItem(LS.url);
       if (prevKey) localStorage.setItem(LS.key, prevKey); else localStorage.removeItem(LS.key);
       if (prevForce) localStorage.setItem(LS.forceLocal, prevForce); else localStorage.removeItem(LS.forceLocal);
-      state.client = null; state.clientSig = '';
+      dropClient();
+      getClient(); // reconnect with the previous settings, if any
       status.textContent = `Connection failed: ${errMsg(err)}`;
       toast(errMsg(err), 'error');
       refreshSyncUI();
@@ -880,11 +988,11 @@
     localStorage.removeItem(LS.url);
     localStorage.removeItem(LS.key);
     localStorage.setItem(LS.forceLocal, '1'); // keeps the built-in defaults from reconnecting
-    state.client = null;
-    state.clientSig = '';
+    dropClient();
     $('#setUrl').value = '';
     $('#setKey').value = '';
     refreshSyncUI();
+    applyAuthGate();
     closeSheets();
     toast('Switched to local-only mode', 'success');
     refreshCurrentTab();
@@ -893,6 +1001,7 @@
   async function uploadLocal() {
     const c = getClient();
     if (!c) { toast('Save your Supabase URL and key first.', 'error'); return; }
+    if (!state.user) { toast('Sign in first, then upload.', 'error'); return; }
     const links = readLocal(LS.links).map(({ id, title, subtitle, badge, url, sort_order }) => ({ id, title, subtitle, badge, url, sort_order }));
     const notes = readLocal(LS.notes).map(({ id, date, title, time, department, description, extra_notes }) => ({ id, date, title, time: time || null, department, description, extra_notes }));
     if (!links.length && !notes.length) { toast('No local data to upload.', 'error'); return; }
@@ -944,7 +1053,6 @@
         case 'edit-note': openNoteSheet(id); break;
         case 'delete-note': deleteNote(id); break;
         case 'copy-report': copyReport(); break;
-        case 'export-json': exportJson(); break;
         default: break;
       }
     });
@@ -955,6 +1063,11 @@
     $('#uploadLocal').addEventListener('click', uploadLocal);
     $('#linkForm').addEventListener('submit', submitLink);
     $('#noteForm').addEventListener('submit', submitNote);
+    $('#noteDate').addEventListener('input', updateNoteSheetDate);
+    $('#noteDate').addEventListener('change', updateNoteSheetDate);
+    $('#loginForm').addEventListener('submit', signIn);
+    $('#togglePassword').addEventListener('click', togglePassword);
+    $('#signOutBtn').addEventListener('click', signOut);
 
     $('#reportMonth').addEventListener('change', (e) => {
       state.reportMonth = e.target.value;
@@ -968,12 +1081,19 @@
    * Init
    * ------------------------------------------------------------------ */
   function init() {
-    $('#noteDept').innerHTML = DEPARTMENTS.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    $('#noteDept').innerHTML = `<option value="" disabled>Choose a department…</option>` +
+      DEPARTMENTS.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
     buildMonthOptions();
     bindEvents();
     refreshSyncUI();
     refreshIcons();
-    loadLinks();
+    const c = getClient();
+    if (!c) { loadLinks(); return; }
+    // Synced mode: wait to learn whether this device is signed in before loading anything.
+    $('#linksList').innerHTML = spinnerBlock('Checking sign-in…');
+    c.auth.getSession()
+      .then(({ data }) => setUser(data && data.session ? data.session.user : null))
+      .catch(() => setUser(null));
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

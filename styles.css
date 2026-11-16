@@ -100,10 +100,10 @@ body.no-scroll { overflow: hidden; }
 .field:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px rgba(179, 15, 15, .18); }
 textarea.field { resize: vertical; min-height: 96px; }
 select.field {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='images\MKAC-logo.png' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat: no-repeat; background-position: right 12px center; padding-right: 38px;
 }
-input[type="time"].field { min-width: 0; }
+input[type="time"].field, input[type="date"].field { min-width: 0; }
 
 /* Buttons */
 .btn {
@@ -248,3 +248,36 @@ input[type="time"].field { min-width: 0; }
 
 .pre-wrap { white-space: pre-wrap; word-break: break-word; }
 code { font-size: 12px; }
+/* Login screen (above the app, below sheets so Settings can open on top) */
+.login-screen {
+  position: fixed; inset: 0; z-index: 70;
+  padding-top: env(safe-area-inset-top);
+  background: var(--page); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column;
+}
+.login-top { background: #fff; display: flex; justify-content: center; padding: 18px 16px 14px; }
+.login-logo { height: 72px; width: auto; }
+.login-body {
+  flex: 1; display: flex; align-items: flex-start; justify-content: center;
+  padding: 28px 16px calc(28px + env(safe-area-inset-bottom));
+}
+.login-card {
+  width: 100%; max-width: 400px; background: #fff;
+  border: 1px solid var(--line); border-top: 4px solid var(--red); border-radius: 20px;
+  padding: 24px 20px 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+}
+.login-mark {
+  width: 52px; height: 52px; border-radius: 999px; background: var(--red); color: #fff;
+  display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;
+}
+.pw-toggle { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); color: #525252; }
+.pw-toggle:active { transform: translateY(-50%) scale(.94); }
+.login-error {
+  margin-top: 8px; padding: 10px 12px; border-radius: 12px;
+  background: var(--red-soft); color: var(--red-dark); font-size: 14px; font-weight: 600;
+}
+.login-link {
+  display: block; margin: 14px auto 0; padding: 8px 12px;
+  background: transparent; border: 0; font-family: inherit; font-size: 13px; font-weight: 600;
+  color: #737373; text-decoration: underline; cursor: pointer;
+}
