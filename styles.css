@@ -242,7 +242,14 @@ input[type="time"].field, input[type="date"].field { min-width: 0; }
   padding: 12px 14px; background: #000; color: #fff;
 }
 .dept-head h3 { color: #fff !important; }
-.dept-head span { color: #fff !important; background: var(--red); border-radius: 999px; padding: 1px 10px; font-weight: 700; }
+.dept-head .dept-count { color: #fff !important; background: var(--red); border-radius: 999px; padding: 1px 10px; font-weight: 700; }
+.dept-head .icon-btn { width: 40px; height: 40px; }
+.dept-chip {
+  display: inline-flex; align-items: center; gap: 4px; margin: 4px 4px 0 0;
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  color: #333; background: #fff; border: 1px dashed #bbb; cursor: pointer; font-family: inherit;
+}
+.dept-chip:hover { border-color: var(--red); color: var(--red); }
 .report-item { padding: 12px 14px; border-top: 1px solid var(--line); }
 .report-item:first-of-type { border-top: 0; }
 

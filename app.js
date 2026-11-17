@@ -619,10 +619,21 @@
     sel.value = value || '';
   }
 
-  function openNoteSheet(id) {
-    const note = id ? state.monthNotes.find((n) => n.id === id) : null;
-    const date = note ? note.date : state.selected;
-    const lastDept = localStorage.getItem(LS.lastDept);
+  // A note can be opened from the calendar or from the Report Notes tab.
+  const findNote = (id) =>
+    state.monthNotes.find((n) => n.id === id) || state.reportNotes.find((n) => n.id === id) || null;
+
+  // Default date for a new entry added from the Report Notes tab:
+  // today if it falls in that month, otherwise the 1st of the month.
+  function defaultReportDate() {
+    const t = todayStr();
+    return t.slice(0, 7) === state.reportMonth ? t : `${state.reportMonth}-01`;
+  }
+
+  function openNoteSheet(id, opts = {}) {
+    const note = id ? findNote(id) : null;
+    const date = note ? note.date : (opts.date || state.selected);
+    const lastDept = opts.dept || localStorage.getItem(LS.lastDept);
     $('#noteSheetTitle').textContent = note ? 'Edit Entry' : 'New Entry';
     $('#noteId').value = note ? note.id : '';
     $('#noteDate').value = date;
@@ -647,7 +658,7 @@
     if (!department) { toast('Please choose a department.', 'error'); $('#noteDept').focus(); return; }
     const id = $('#noteId').value || uid();
     const isEdit = !!$('#noteId').value;
-    const original = isEdit ? state.monthNotes.find((n) => n.id === id) : null;
+    const original = isEdit ? findNote(id) : null;
     const moved = !!original && original.date !== date;
     const payload = {
       id,
@@ -669,19 +680,21 @@
       state.viewY = d.getFullYear();
       state.viewM = d.getMonth();
       state.selected = date;
-      await loadMonth();
+      if (state.tab === 'report') await loadReport();
+      else await loadMonth();
     } catch (err) {
       toast(errMsg(err), 'error');
     }
   }
 
   async function deleteNote(id) {
-    const note = state.monthNotes.find((n) => n.id === id);
+    const note = findNote(id);
     if (!note || !confirm(`Delete "${note.title}"?`)) return;
     try {
       await withButton(null, () => api.deleteNote(id));
       toast('Entry deleted', 'success');
-      await loadMonth();
+      if (state.tab === 'report') await loadReport();
+      else await loadMonth();
     } catch (err) {
       toast(errMsg(err), 'error');
     }
@@ -748,7 +761,11 @@
 
     if (!notes.length) {
       summary.innerHTML = '';
-      body.innerHTML = `<div class="card p-6 text-center text-sm text-neutral-500">No entries logged for ${esc(monthLabel(state.reportMonth))}.</div>`;
+      body.innerHTML = `<div class="card p-5 text-sm text-neutral-500">
+        <p class="text-center mb-3">No entries logged for ${esc(monthLabel(state.reportMonth))}. Tap a department to add a note:</p>
+        <div>${DEPARTMENTS.map((d) => `<button type="button" class="dept-chip" data-action="report-add" data-dept="${esc(d)}"><i data-lucide="plus" class="w-3 h-3"></i>${esc(d)}</button>`).join('')}</div>
+      </div>`;
+      refreshIcons();
       return;
     }
 
@@ -757,25 +774,50 @@
     summary.innerHTML = `
       <div class="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm">
         <p class="text-red-700 font-semibold">${notes.length} ${notes.length === 1 ? 'entry' : 'entries'} across ${groups.length} ${groups.length === 1 ? 'department' : 'departments'}</p>
-        ${missing.length ? `<p class="text-neutral-500 mt-1"><span class="text-neutral-700">No activity logged:</span> ${esc(missing.join(', '))}</p>` : ''}
+        ${missing.length ? `<p class="text-neutral-700 mt-2 mb-1">No activity logged yet. Tap one to add a note:</p>
+          <div>${missing.map((d) => `<button type="button" class="dept-chip" data-action="report-add" data-dept="${esc(d)}"><i data-lucide="plus" class="w-3 h-3"></i>${esc(d)}</button>`).join('')}</div>` : ''}
       </div>`;
 
-    body.innerHTML = groups.map((g) => `
+    body.innerHTML = groups.map((g, gi) => `
       <section class="dept-block">
         <div class="dept-head">
-          <h3 class="font-semibold text-red-700">${esc(g.dept)}</h3>
-          <span class="text-xs text-neutral-500">${g.items.length}</span>
+          <div class="flex items-center gap-2 min-w-0">
+            <h3 class="font-semibold truncate">${esc(g.dept)}</h3>
+            <span class="dept-count text-xs">${g.items.length}</span>
+          </div>
+          <div class="flex items-center shrink-0 -mr-2">
+            ${g.dept === 'Unassigned' ? '' : `<button class="icon-btn icon-btn-light" data-action="report-add" data-dept="${esc(g.dept)}" aria-label="Add note to ${esc(g.dept)}"><i data-lucide="plus" class="w-5 h-5"></i></button>`}
+            <button class="icon-btn icon-btn-light" data-action="copy-dept" data-index="${gi}" aria-label="Copy ${esc(g.dept)} notes"><i data-lucide="copy" class="w-4 h-4"></i></button>
+          </div>
         </div>
         ${g.items.map((n) => `
           <div class="report-item">
-            <div class="flex items-center gap-2 text-xs text-neutral-500 mb-1">
-              <span>${esc(fmtDateShort(n.date))}</span>${n.time ? `<span>·</span><span>${esc(fmtTime(n.time))}</span>` : ''}
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2 text-xs text-neutral-500 mb-1">
+                <span>${esc(fmtDateShort(n.date))}</span>${n.time ? `<span>·</span><span>${esc(fmtTime(n.time))}</span>` : ''}
+              </div>
+              <div class="flex shrink-0 -mr-2 -mt-2">
+                <button class="icon-btn" data-action="edit-note" data-id="${esc(n.id)}" aria-label="Edit entry"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                <button class="icon-btn danger" data-action="delete-note" data-id="${esc(n.id)}" aria-label="Delete entry"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </div>
             </div>
             <p class="font-medium text-neutral-900">${esc(n.title)}</p>
             ${n.description ? `<p class="text-sm text-neutral-700 mt-1 pre-wrap">${esc(n.description)}</p>` : ''}
             ${n.extra_notes ? `<p class="text-sm text-neutral-700 mt-2 pre-wrap"><span class="font-semibold text-red-700">Notes:</span> ${esc(n.extra_notes)}</p>` : ''}
           </div>`).join('')}
       </section>`).join('');
+    refreshIcons();
+  }
+
+  function deptLines(g) {
+    const lines = [`■ ${g.dept} (${g.items.length})`];
+    g.items.forEach((n) => {
+      const when = [fmtDateShort(n.date), n.time ? fmtTime(n.time) : ''].filter(Boolean).join(', ');
+      lines.push(`• ${when} — ${n.title}`);
+      if (n.description) lines.push(`  Details: ${n.description.replace(/\n/g, '\n           ')}`);
+      if (n.extra_notes) lines.push(`  Notes: ${n.extra_notes.replace(/\n/g, '\n         ')}`);
+    });
+    return lines;
   }
 
   function buildReportText() {
@@ -785,17 +827,19 @@
     lines.push(dueDateText(state.reportMonth));
     lines.push(`Total entries: ${state.reportNotes.length}`);
     lines.push('');
-    groups.forEach((g) => {
-      lines.push(`■ ${g.dept} (${g.items.length})`);
-      g.items.forEach((n) => {
-        const when = [fmtDateShort(n.date), n.time ? fmtTime(n.time) : ''].filter(Boolean).join(', ');
-        lines.push(`• ${when} — ${n.title}`);
-        if (n.description) lines.push(`  Details: ${n.description.replace(/\n/g, '\n           ')}`);
-        if (n.extra_notes) lines.push(`  Notes: ${n.extra_notes.replace(/\n/g, '\n         ')}`);
-      });
-      lines.push('');
-    });
+    groups.forEach((g) => { lines.push(...deptLines(g), ''); });
     return lines.join('\n').trim();
+  }
+
+  async function copyDept(index) {
+    const g = groupByDepartment(state.reportNotes)[Number(index)];
+    if (!g) return;
+    try {
+      await copyText(`${monthLabel(state.reportMonth)}\n${deptLines(g).join('\n')}`);
+      toast(`${g.dept} notes copied`, 'success');
+    } catch (err) {
+      toast(`Couldn't copy: ${errMsg(err)}`, 'error');
+    }
   }
 
   async function copyText(text) {
@@ -1053,6 +1097,8 @@
         case 'edit-note': openNoteSheet(id); break;
         case 'delete-note': deleteNote(id); break;
         case 'copy-report': copyReport(); break;
+        case 'copy-dept': copyDept(act.dataset.index); break;
+        case 'report-add': openNoteSheet(null, { dept: act.dataset.dept, date: defaultReportDate() }); break;
         default: break;
       }
     });
